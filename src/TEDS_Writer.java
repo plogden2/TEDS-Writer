@@ -217,15 +217,19 @@ public class TEDS_Writer {
 
         // for each value in data map
         for (String key : map_keys) {
-            System.out.println(key + " Byte: " + index + " Bit: " + sub_index);
             // get data
             type = data_map.get(key)[3].replaceAll("\\s", "");
             length = (int) Double.parseDouble(data_map.get(key)[1]);
-            if (type.equals("UNINT"))
+            if (type.equals("UNINT") || type.equals("ConRes") || type.equals("ConRelRes"))
                 int_entry = (int) Double.parseDouble(data_map.get(key)[0]);
             else if (type.equals("Chr5")) {
-                char_entry = data_map.get(key)[0].charAt(0);
-                int_entry = (int) (((byte) char_entry << 3)>>3)-64;
+                str_entry = data_map.get(key)[0];
+                int_entry = 0;
+                for (int i = 0; i < str_entry.length(); i++) {
+                    char_entry = str_entry.charAt(i);
+                    int_entry += (int) ((((byte) char_entry << 3) >> 3) - 64) << 5 * i;
+                }
+
             } else
                 throw new Exception("Unrecognized data type " + data_map.get(key)[3]);
 
@@ -257,13 +261,13 @@ public class TEDS_Writer {
 
     // add at most a byte to the buffer filling in empty space
     public void addToBuffer(byte[] buffer, byte data, int length) {
-        if(index==0)//skip checksum byte
+        if (index == 0)// skip checksum byte
             index++;
         if (length > 8)
             length = 8;
 
         if (sub_index == 0) {
-            buffer[index] = (byte) (data << (length - 8));// shift the data all the way to the left in an empty byte
+            buffer[index] = (byte) (data << 8-(length));// shift the data all the way to the left in an empty byte
             sub_index += length;
             if (sub_index >= 8) {
                 sub_index = 0;
@@ -271,28 +275,33 @@ public class TEDS_Writer {
             }
         } else {
             int temp = 8 - sub_index;
-            buffer[index] = (byte)((buffer[index]>>temp)+(byte)(data<<sub_index));// move existing buffer data right, shift new data left, and add new data
+            int temp_byte = buffer[index];
+            if(temp_byte<0)temp_byte+=256;
+            buffer[index] = (byte) ((byte)(temp_byte>>temp) + (byte)(data << sub_index));// move existing buffer data
+                                                                                          // right, shift new data left,
+                                                                                          // and add new data
             
-            sub_index += length;
             if (sub_index >= 8) {
                 sub_index = 0;
                 index++;// move to the next byte
                 data = (byte) (data >> temp);// remove the bits that were added to the
-                buffer[index] = (byte)(data<<temp);// shift the leftover data all the way to the left in an
+                buffer[index] = (byte) (data << 8-(length-temp));// shift the leftover data all the way to the left in an
                 sub_index += length - temp;
+            } else {
+                buffer[index] = (byte) (buffer[index] << (8 - sub_index)); // shift data left in not full
             }
         }
     }
 
-    public void calculateChecksum(byte[] buffer){
+    public void calculateChecksum(byte[] buffer) {
         int sum = 0;
-        for(int i = 0; i < (buffer.length-1); ++i) {
+        for (int i = 0; i < (buffer.length - 1); ++i) {
             sum += buffer[i];
         }
-        //modulo 256 sum
+        // modulo 256 sum
         sum %= 256;
 
-        //twos complement
+        // twos complement
         byte twos_complement = (byte) (~(sum) + 1);
 
         buffer[0] = twos_complement;
@@ -332,11 +341,10 @@ public class TEDS_Writer {
             String[] arr;
             while (row_iterator.hasNext()) {
                 row = row_iterator.next(); // For each row, iterate through each columns
-                if (row.getCell(0) != null) {
+                if (row.getCell(0) != null && row.getCell(0).getCellType() == CellType.STRING) {
                     // add field and entry to hash map
                     cell = row.getCell(0);
-                    field = (cell.getCellType() == CellType.STRING) ? cell.getStringCellValue()
-                            : String.valueOf(cell.getNumericCellValue());
+                    field = cell.getStringCellValue();
                     cell = row.getCell(1);
                     length = (cell.getCellType() == CellType.STRING) ? cell.getStringCellValue()
                             : String.valueOf(cell.getNumericCellValue());
