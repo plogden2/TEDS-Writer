@@ -342,6 +342,7 @@ public class TEDS_Writer {
         String str_entry, type;
         char char_entry;
         int int_entry = 0;
+        float float_entry = 0;
         int length = 0;
         int byte_length = 0;
         byte[] byte_arr = { (byte) 0, (byte) 0, (byte) 0, (byte) 0 };
@@ -373,11 +374,18 @@ public class TEDS_Writer {
                 int_entry = conRelResToInt(data_map.get(key)[0], data_map.get(key)[2]);
             } else if (type.equals("ConRes")) {
                 int_entry = conResToInt(data_map.get(key)[0], data_map.get(key)[2]);
+            } else if (type.equals("Single")) {
+                float_entry = (float) Double.parseDouble(data_map.get(key)[0]);
+                int_entry = Float.floatToIntBits(float_entry);
             } else
                 throw new Exception("Unrecognized data type " + data_map.get(key)[3]);
 
+            System.out.println(key + ": Pos: " + (sub_index == 0 ? index * 8 : ((index - 1) * 8 + sub_index)));// print
+                                                                                                               // bitpos
+                                                                                                               // for
+                                                                                                               // each
+                                                                                                               // element
 
-            System.out.println(key+": Pos: "+(sub_index==0?index*8:((index-1)*8+sub_index)));
             // put data into byte array
             byte_arr[0] = (byte) (int_entry >>> 24);
             byte_arr[1] = (byte) (int_entry >>> 16);
@@ -397,9 +405,10 @@ public class TEDS_Writer {
             if (byte_length > 0)
                 addToBuffer(buffer, byte_arr[0], byte_length);
 
+            int_entry = 0;
         }
-        sub_index=0;
-        addToBuffer(buffer, (byte)255, 8);
+        sub_index = 0;
+        addToBuffer(buffer, (byte) 255, 8);
 
         calculateChecksum(buffer);
 
@@ -414,7 +423,7 @@ public class TEDS_Writer {
      * @param length length of the data
      */
     public void addToBuffer(byte[] buffer, byte data, int length) {
-        if (index == 0)// skip checksum byte
+        if (index % 32 == 0)// skip checksum bytes
             index++;
         if (length > 8)
             length = 8;
@@ -425,6 +434,8 @@ public class TEDS_Writer {
             if (sub_index >= 8) {
                 sub_index = 0;
                 index++;// move to the next byte
+                if (index % 32 == 0)// skip checksum bytes
+                    index++;
             }
         } else {
             int temp = 8 - sub_index;
@@ -440,6 +451,8 @@ public class TEDS_Writer {
             if (sub_index >= 8) {
                 sub_index = 0;
                 index++;// move to the next byte
+                if (index % 32 == 0)// skip checksum bytes
+                    index++;
                 data = (byte) (data >> temp);// remove the bits that were added to the
                 buffer[index] = (byte) (data << 8 - (length - temp));// shift the leftover data all the way to the left
                                                                      // in an
@@ -456,15 +469,18 @@ public class TEDS_Writer {
      * @param buffer byte array
      */
     public void calculateChecksum(byte[] buffer) {
-        int sum = 0;
-        for (int i = 0; i < 32; ++i) {
-            sum += buffer[i];
+        for (int block = 0; block <= (int) index / 32; block++) {
+            System.out.println(block);
+            int sum = 0;
+            for (int i = 1; i < 32; ++i) {
+                sum += buffer[block * 32 + i];
+            }
+            // modulus 256 sum
+            sum %= 256;
+            // twos complement
+            byte twos_complement = (byte) (~(sum) + 1);
+            buffer[block * 32] = twos_complement;
         }
-        // modulus 256 sum
-        sum %= 256;
-        // twos complement
-        byte twos_complement = (byte) (~(sum) + 1);
-        buffer[0] = twos_complement;
     }
 
     /**
@@ -551,6 +567,7 @@ public class TEDS_Writer {
         double step = Double.valueOf(range.substring(range.indexOf("step") + 5));
 
         value = (int) Math.round((double_entry - min) / step);
+        System.out.println(value);
 
         return value;
     }
@@ -569,6 +586,7 @@ public class TEDS_Writer {
 
         value = (int) Math.round(((1 / (Math.log10(1 + resolution * 2))) * Math.log10(double_entry / min)));
 
+        System.out.println(value);
         return value;
     }
 
