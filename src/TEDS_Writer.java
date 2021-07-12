@@ -64,25 +64,30 @@ public class TEDS_Writer {
                     if (adapter.canOverdrive() && (owd.getMaxSpeed() == DSPortAdapter.SPEED_OVERDRIVE))
                         owd.setSpeed(owd.getMaxSpeed(), true);
 
-                    // print the TEDS data in the spreadsheet
-                    printTEDSData();
+                    if (args.length == 0 || (args[0].indexOf("r") == -1)) {
 
-                    // promt the user to verify the data
-                    Scanner scanner = new Scanner(System.in); // Create a Scanner object
-                    String ans = ""; // user input
-                    System.out.println("============================");
-                    System.out.println("Does this look correct (Y/N)?");
-                    while (ans.length() == 0
-                            || (ans.toLowerCase().charAt(0) != 'y' && ans.toLowerCase().charAt(0) != 'n'))
-                        ans = scanner.nextLine();
-                    scanner.close();
+                        // print the TEDS data in the spreadsheet
+                        printTEDSData();
 
-                    if (ans.toLowerCase().charAt(0) == 'y') {
-                        clearEEPROM(owd);
-                        byte[] buffer = writeTEDS(owd);
-                        verifyTEDS(owd, buffer);
-                    } else
-                        System.out.println("Closing Application");
+                        // promt the user to verify the data
+                        Scanner scanner = new Scanner(System.in); // Create a Scanner object
+                        String ans = ""; // user input
+                        System.out.println("============================");
+                        System.out.println("Does this look correct (Y/N)?");
+                        while (ans.length() == 0
+                                || (ans.toLowerCase().charAt(0) != 'y' && ans.toLowerCase().charAt(0) != 'n'))
+                            ans = scanner.nextLine();
+                        scanner.close();
+
+                        if (ans.toLowerCase().charAt(0) == 'y') {
+                            clearEEPROM(owd);
+                            byte[] buffer = writeTEDS(owd);
+                            verifyTEDS(owd, buffer);
+                        } else
+                            System.out.println("Closing Application");
+                    } else {
+                        readEEPROM(owd);
+                    }
                 }
             }
 
@@ -128,7 +133,7 @@ public class TEDS_Writer {
 
                 try {
                     buffer = new byte[bank.getSize()];
-                    Arrays.fill(buffer, (byte) 0);
+                    formatBuffer(buffer);
 
                     // start timer to time the dump of the bank contents
                     start_time = System.currentTimeMillis();
@@ -177,6 +182,7 @@ public class TEDS_Writer {
                 try {
                     buffer = new byte[bank.getSize()];
                     formatBuffer(buffer);
+                    formatData(buffer);
 
                     // start timer to time the dump of the bank contents
                     start_time = System.currentTimeMillis();
@@ -262,19 +268,83 @@ public class TEDS_Writer {
     }
 
     /**
-     * formats the data into a byte array to be written
+     * Reads the EPROM and prints the contents
+     *
+     * @param device device to read
+     */
+    public void readEEPROM(OneWireContainer device) {
+        System.out.println("\nReading data on EEPROM");
+
+        byte[] read_buf = {};// data array
+        boolean found_bank = false;
+        int i, reps = 10;
+
+        // loop through all of the memory banks on device
+        // get the port names we can use and try to open, test and close each
+        for (Enumeration bank_enum = device.getMemoryBanks(); bank_enum.hasMoreElements();) {
+
+            // get the next memory bank
+            MemoryBank bank = (MemoryBank) bank_enum.nextElement();
+            if (bank.getBankDescription().toLowerCase().indexOf("main") != -1) {// if its the main memory
+
+                // found a memory bank
+                found_bank = true;
+
+                try {
+                    read_buf = new byte[bank.getSize()];
+
+                    // get overdrive going so not a factor in time tests
+                    bank.read(0, false, read_buf, 0, 1);
+
+                    // dynamically change number of reps
+                    reps = 1500 / read_buf.length;
+
+                    if (device.getMaxSpeed() == DSPortAdapter.SPEED_OVERDRIVE)
+                        reps *= 2;
+                    // read the entire bank
+                    for (i = 0; i < reps; i++)
+                        bank.read(0, false, read_buf, 0, bank.getSize());
+
+                    System.out.println("Contents:");
+                    System.out.println(bytesToHex(read_buf));
+
+                } catch (Exception e) {
+                    System.out.println("Exception in reading: " + e + "  TRACE: ");
+                    e.printStackTrace();
+                }
+
+            }
+        }
+
+        if (!found_bank)
+            System.out.println("The device doesn't contain any memory banks");
+    }
+
+    /**
+     * formats the buffer to fill usable memory
      *
      * @param buffer byte array to add data to
      */
     public void formatBuffer(byte[] buffer) throws Exception {
+        Arrays.fill(buffer, (byte) 0);
+        // fill usable portion of memory bank
+        for (int i = 0; i < 8 * 32; i++) {
+            buffer[i] = (byte) ((i % 32 == 0) ? 31 : 255);
+        }
+    }
+
+    /**
+     * formats the data into a byte array to be written
+     *
+     * @param buffer byte array to add data to
+     */
+    public void formatData(byte[] buffer) throws Exception {
         String str_entry, type;
         char char_entry;
         int int_entry = 0;
         int length = 0;
         int byte_length = 0;
         byte[] byte_arr = { (byte) 0, (byte) 0, (byte) 0, (byte) 0 };
-
-        Arrays.fill(buffer, (byte) 0);
 
         // for each value in data map
         for (String key : map_keys) {
@@ -306,6 +376,8 @@ public class TEDS_Writer {
             } else
                 throw new Exception("Unrecognized data type " + data_map.get(key)[3]);
 
+
+            System.out.println(key+": Pos: "+(sub_index==0?index*8:((index-1)*8+sub_index)));
             // put data into byte array
             byte_arr[0] = (byte) (int_entry >>> 24);
             byte_arr[1] = (byte) (int_entry >>> 16);
@@ -313,19 +385,21 @@ public class TEDS_Writer {
             byte_arr[3] = (byte) ((int_entry < 0) ? int_entry + 256 : int_entry);
 
             byte_length = length;
-            if (!(byte_length <= 0))
+            if (byte_length > 0)
                 addToBuffer(buffer, byte_arr[3], byte_length);
             byte_length = length - 8;
-            if (!(byte_length <= 0))
+            if (byte_length > 0)
                 addToBuffer(buffer, byte_arr[2], byte_length);
             byte_length = length - 16;
-            if (!(byte_length <= 0))
+            if (byte_length > 0)
                 addToBuffer(buffer, byte_arr[1], byte_length);
             byte_length = length - 24;
-            if (!(byte_length <= 0))
+            if (byte_length > 0)
                 addToBuffer(buffer, byte_arr[0], byte_length);
 
         }
+        sub_index=0;
+        addToBuffer(buffer, (byte)255, 8);
 
         calculateChecksum(buffer);
 
@@ -383,7 +457,7 @@ public class TEDS_Writer {
      */
     public void calculateChecksum(byte[] buffer) {
         int sum = 0;
-        for (int i = 0; i < (buffer.length - 1); ++i) {
+        for (int i = 0; i < 32; ++i) {
             sum += buffer[i];
         }
         // modulus 256 sum
