@@ -1,19 +1,19 @@
 import java.util.*;
-import java.util.concurrent.TimeUnit;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.time.*;
-import java.time.format.DateTimeFormatter;
 
 import com.dalsemi.onewire.*;
 import com.dalsemi.onewire.adapter.*;
 import com.dalsemi.onewire.container.*;
+import org.apache.poi.xssf.usermodel.*;
 import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.openxml4j.opc.*;
 
 /**
  * TEDS Writer Tool
  *
- * @version 1.0, 7 July 2021
+ * @version 1.2, 19 July 2021
  * @author Patrick Ogden
  */
 public class TEDS_Writer {
@@ -24,9 +24,16 @@ public class TEDS_Writer {
 
     public TEDS_Writer(String[] args) throws Exception {
         try {
+
             boolean eeprom_found = false;
             // get the default adapter
-            DSPortAdapter adapter = OneWireAccessProvider.getDefaultAdapter();
+            DSPortAdapter adapter = null;
+            try {
+                adapter = OneWireAccessProvider.getDefaultAdapter();
+            } catch (Exception e) {
+                throw new Exception(
+                        "\n\nAdapter not connected.\nConnect a 1-Wire adapter and relaunch the application.\n");
+            }
 
             // check if adapter can program EPROMS
             // if(adapter.canProgram())
@@ -44,65 +51,68 @@ public class TEDS_Writer {
             adapter.setSearchAllDevices();
             adapter.targetAllFamilies();
             adapter.setSpeed(adapter.SPEED_REGULAR);
+            System.out.println("==============================================\n");
 
-            // enumerate through all the iButtons found
-            for (Enumeration owd_enum = adapter.getAllDeviceContainers(); owd_enum.hasMoreElements();) {
+            while (!eeprom_found) {
+                // enumerate through all the iButtons found
+                for (Enumeration owd_enum = adapter.getAllDeviceContainers(); owd_enum.hasMoreElements();) {
 
-                // get the next owd
-                OneWireContainer owd = (OneWireContainer) owd_enum.nextElement();
+                    // get the next owd
+                    OneWireContainer owd = (OneWireContainer) owd_enum.nextElement();
 
-                // if the device is an eprom
-                if (owd.getDescription().indexOf("EPROM") != -1) {
-                    eeprom_found = true;
-                    System.out.println("============================");
-                    System.out.println("Device Name: " + owd.getName());
-                    System.out.println("Device Other Names: " + owd.getAlternateNames());
-                    System.out.println("Device Description: " + owd.getDescription());
-                    System.out.println("============================");
+                    // if the device is an eprom
+                    if (owd.getDescription().indexOf("EPROM") != -1) {
+                        eeprom_found = true;
+                        System.out.println("==============================================");
+                        System.out.println("Device Name: " + owd.getName());
+                        System.out.println("Device Other Names: " + owd.getAlternateNames());
+                        System.out.println("Device Description: " + owd.getDescription());
+                        System.out.println("==============================================");
 
-                    // set owd to max possible speed with available adapter, allow fall back
-                    if (adapter.canOverdrive() && (owd.getMaxSpeed() == DSPortAdapter.SPEED_OVERDRIVE))
-                        owd.setSpeed(owd.getMaxSpeed(), true);
+                        // set owd to max possible speed with available adapter, allow fall back
+                        if (adapter.canOverdrive() && (owd.getMaxSpeed() == DSPortAdapter.SPEED_OVERDRIVE))
+                            owd.setSpeed(owd.getMaxSpeed(), true);
 
-                    if (args.length == 0 || (args[0].indexOf("r") == -1)) {
+                        if (args.length == 0 || (args[0].indexOf("r") == -1)) {
 
-                        // print the TEDS data in the spreadsheet
-                        printTEDSData();
+                            // print the TEDS data in the spreadsheet
+                            printTEDSData();
 
-                        // promt the user to verify the data
-                        Scanner scanner = new Scanner(System.in); // Create a Scanner object
-                        String ans = ""; // user input
-                        System.out.println("============================");
-                        System.out.println("Does this look correct (Y/N)?");
-                        while (ans.length() == 0
-                                || (ans.toLowerCase().charAt(0) != 'y' && ans.toLowerCase().charAt(0) != 'n'))
-                            ans = scanner.nextLine();
-                        scanner.close();
+                            // promt the user to verify the data
+                            Scanner scanner = new Scanner(System.in); // Create a Scanner object
+                            String ans = ""; // user input
+                            System.out.println("============================");
+                            System.out.println("Does this look correct (Y/N)?");
+                            while (ans.length() == 0
+                                    || (ans.toLowerCase().charAt(0) != 'y' && ans.toLowerCase().charAt(0) != 'n'))
+                                ans = scanner.nextLine();
+                            scanner.close();
 
-                        if (ans.toLowerCase().charAt(0) == 'y') {
-                            clearEEPROM(owd);
-                            byte[] buffer = writeTEDS(owd);
-                            verifyTEDS(owd, buffer);
-                        } else
-                            System.out.println("Closing Application");
-                    } else {
-                        readEEPROM(owd);
+                            if (ans.toLowerCase().charAt(0) == 'y') {
+                                clearEEPROM(owd);
+                                byte[] buffer = writeTEDS(owd);
+                                verifyTEDS(owd, buffer);
+                            } else
+                                System.out.println("Closing Application");
+                        } else {
+                            readEEPROM(owd);
+                        }
                     }
                 }
+
+                // end exclusive use of adapter
+                adapter.endExclusive();
+
+                if (!eeprom_found)
+                    System.out.print("No EEPROM Connected. Please connect an EEPROM.\r");
             }
-
-            // end exclusive use of adapter
-            adapter.endExclusive();
-
-            if (!eeprom_found)
-                System.out.println("No EEPROM Found");
 
             // free the port used by the adapter
             System.out.println("Releasing adapter port");
             adapter.freePort();
         } catch (Exception e) {
             System.out.println("Exception: " + e);
-            e.printStackTrace();
+            // e.printStackTrace();
         }
 
         System.exit(0);
@@ -252,6 +262,7 @@ public class TEDS_Writer {
                         System.out.println("EEPROM Verification Successful");
                     else {
                         System.out.println("EEPROM Verification Failed\nData Mismatch\n");
+                        System.out.println("Expected Data:\n" + bytesToHex(buffer));
                         System.out.println("Found Data:\n" + bytesToHex(read_buf));
                     }
 
@@ -380,11 +391,12 @@ public class TEDS_Writer {
             } else
                 throw new Exception("Unrecognized data type " + data_map.get(key)[3]);
 
-            System.out.println(key + ": Pos: " + (sub_index == 0 ? index * 8 : ((index - 1) * 8 + sub_index)));// print
-                                                                                                               // bitpos
-                                                                                                               // for
-                                                                                                               // each
-                                                                                                               // element
+            // System.out.println(key + ": Pos: " + (sub_index == 0 ? index * 8 : ((index -
+            // 1) * 8 + sub_index)));// print
+            // bitpos
+            // for
+            // each
+            // element
 
             // put data into byte array
             byte_arr[0] = (byte) (int_entry >>> 24);
@@ -412,7 +424,6 @@ public class TEDS_Writer {
 
         calculateChecksum(buffer);
 
-        System.out.println(bytesToHex(buffer));
     }
 
     /**
@@ -470,7 +481,6 @@ public class TEDS_Writer {
      */
     public void calculateChecksum(byte[] buffer) {
         for (int block = 0; block <= (int) index / 32; block++) {
-            System.out.println(block);
             int sum = 0;
             for (int i = 1; i < 32; ++i) {
                 sum += buffer[block * 32 + i];
@@ -494,13 +504,16 @@ public class TEDS_Writer {
             System.out.println(String.format("%30s", key) + ":\t" + String.format("%-20s", value));
         }
     }
+    
 
     /**
      * Reads the TEDS data from the xlsx file
      */
     public void getTEDSData() throws Exception {
         if (map_keys.size() == 0) {// only get data once
-            Workbook workbook = WorkbookFactory.create(new FileInputStream("TEDS_Data.xlsx")); // open XLSX workbook
+            OPCPackage pkg = OPCPackage.open(new File("TEDS_Data.xlsx"));
+            XSSFWorkbook workbook = new XSSFWorkbook(pkg);
+
             Sheet sheet = workbook.getSheetAt(0); // set to first sheet
             Iterator<Row> row_iterator = sheet.iterator(); // create a row iterator
             Row row = row_iterator.next();
@@ -534,6 +547,7 @@ public class TEDS_Writer {
                 }
             }
             workbook.close();
+            pkg.close();
         }
     }
 
@@ -567,7 +581,6 @@ public class TEDS_Writer {
         double step = Double.valueOf(range.substring(range.indexOf("step") + 5));
 
         value = (int) Math.round((double_entry - min) / step);
-        System.out.println(value);
 
         return value;
     }
@@ -586,7 +599,6 @@ public class TEDS_Writer {
 
         value = (int) Math.round(((1 / (Math.log10(1 + resolution * 2))) * Math.log10(double_entry / min)));
 
-        System.out.println(value);
         return value;
     }
 
