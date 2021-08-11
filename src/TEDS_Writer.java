@@ -13,20 +13,20 @@ import org.apache.poi.openxml4j.opc.*;
 /**
  * TEDS Writer Tool
  *
- * @version 1.2, 19 July 2021
+ * @version 1.2, 11 August 2021
  * @author Patrick Ogden
  */
 public class TEDS_Writer {
-    private HashMap<String, String[]> data_map = new HashMap<>();
-    private ArrayList<String> map_keys = new ArrayList<>();
+    private HashMap<String, String[]> data_map = new HashMap<>();// map of data in the TEDS_Data spreadsheet
+    private ArrayList<String> map_keys = new ArrayList<>();// list of keys in the data map
     private int index = 0;// current byte of buffer
     private int sub_index = 0;// number of bits filled in byte
 
     public TEDS_Writer(String[] args) throws Exception {
         try {
+            boolean eeprom_found = false;// boolean to track whether an eeprom was found
 
-            boolean eeprom_found = false;
-            // get the default adapter
+            // get the default adapter or throw an exception if it isn't plugged in
             DSPortAdapter adapter = null;
             try {
                 adapter = OneWireAccessProvider.getDefaultAdapter();
@@ -35,7 +35,7 @@ public class TEDS_Writer {
                         "\n\nAdapter not connected.\nConnect a 1-Wire adapter and relaunch the application.\n");
             }
 
-            // check if adapter can program EPROMS
+            // // check if adapter can program EEPROMS (The adapter we use says it can't program)
             // if(adapter.canProgram())
             // System.out.println("Adapter Connected Successfully.");
             // else{
@@ -53,11 +53,12 @@ public class TEDS_Writer {
             adapter.setSpeed(adapter.SPEED_REGULAR);
             System.out.println("==============================================\n");
 
+            // loop until an eeprom is found
             while (!eeprom_found) {
                 // enumerate through all the iButtons found
                 for (Enumeration owd_enum = adapter.getAllDeviceContainers(); owd_enum.hasMoreElements();) {
 
-                    // get the next owd
+                    // get the next one wire device
                     OneWireContainer owd = (OneWireContainer) owd_enum.nextElement();
 
                     // if the device is an eprom
@@ -73,13 +74,14 @@ public class TEDS_Writer {
                         if (adapter.canOverdrive() && (owd.getMaxSpeed() == DSPortAdapter.SPEED_OVERDRIVE))
                             owd.setSpeed(owd.getMaxSpeed(), true);
 
+                        // if the user didn't use the argument "r" when running the program then write to the eeprom
                         if (args.length == 0 || (args[0].indexOf("r") == -1)) {
 
                             // print the TEDS data in the spreadsheet
                             printTEDSData();
 
                             // promt the user to verify the data
-                            Scanner scanner = new Scanner(System.in); // Create a Scanner object
+                            Scanner scanner = new Scanner(System.in); // create a scanner object
                             String ans = ""; // user input
                             System.out.println("============================");
                             System.out.println("Does this look correct (Y/N)?");
@@ -88,6 +90,7 @@ public class TEDS_Writer {
                                 ans = scanner.nextLine();
                             scanner.close();
 
+                            // program and verify if the user chose yes
                             if (ans.toLowerCase().charAt(0) == 'y') {
                                 clearEEPROM(owd);
                                 byte[] buffer = writeTEDS(owd);
@@ -95,7 +98,7 @@ public class TEDS_Writer {
                             } else
                                 System.out.println("Closing Application");
                         } else {
-                            readEEPROM(owd);
+                            readEEPROM(owd); // display the contents of the eeprom
                         }
                     }
                 }
@@ -112,7 +115,7 @@ public class TEDS_Writer {
             adapter.freePort();
         } catch (Exception e) {
             System.out.println("Exception: " + e);
-            // e.printStackTrace();
+            e.printStackTrace();
         }
 
         System.exit(0);
